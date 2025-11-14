@@ -8,27 +8,23 @@ specialized directed message passing.
 """
 
 import json
-import pickle
+import os
 import random
-import sys
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from scipy.optimize import minimize
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
-    classification_report,
     f1_score,
     roc_auc_score,
 )
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from torch_geometric.data import Data
-from torch_geometric.nn import BatchNorm, GATv2Conv, GINEConv
+from torch_geometric.nn import BatchNorm, GINEConv
 from torch_geometric.utils import softmax
 
 
@@ -821,6 +817,7 @@ def main():
     results_df.to_csv(f"{exp_name}.csv", index=False)
 
     # Save each fold's model for potential later use or analysis
+    os.makedirs("gnn_models", exist_ok=True)
     for i, model in enumerate(models):
         torch.save(
             model.state_dict(),
