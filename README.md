@@ -6,8 +6,8 @@ This project implements a directed Graph Neural Network (GNN) with attention mec
 
 ```
 ai-cup-2025/
-├── Model/
-│   └── gnn.py
+├── Model/ (存放主要訓練的模型程式碼)
+│   └── gnn.py （模型程式碼）
 │   └── README.md
 ├── Preprocess/
 │   └── prepare_data.py
@@ -17,7 +17,7 @@ ai-cup-2025/
 │   └── acct_alert.csv
 │   └── acct_predict.csv
 │   └── acct_transaction.csv
-├── main.py
+├── main.py (執行訓練的程式進入點)
 ├── README.md
 ```
 
