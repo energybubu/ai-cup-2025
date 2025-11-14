@@ -2,14 +2,41 @@
 
 This project implements a directed Graph Neural Network (GNN) with attention mechanisms to detect fraudulent accounts in financial transaction networks.
 
+## 📁 Project Structure
+
+```
+ai-cup-2025/
+├── Model/
+│   └── gnn.py
+│   └── README.md
+├── Preprocess/
+│   └── prepare_data.py
+│   └── date_split.py
+│   └── README.md
+├── main.py
+├── README.md
+```
+
+## Harware Required
+GPU with 24GB VRAM
+
+## Environment
+```
+conda create -n ai-cup-2025 python=3.12 -y
+pip install -r requirements.txt
+```
+
 ---
 
-#### Hyperparameters:
-- Hidden dimension: 16
-- Number of layers: 4
-- Attention heads: 4
-- Dropout: 0.0 (GNN layers), 0.5 (attention final layer)
-- Residual connections: Yes
+## 🚀 Usage
+
+```bash
+python main.py
+```
+
+**Outputs**:
+- `{exp_name}.csv`: Predictions for test accounts
+- `gnn_models/{exp_name}_fold_{i}.pt`: Saved model weights for each fold
 
 ---
 
@@ -76,6 +103,13 @@ The model processes financial data as a directed graph where:
 4. **Evaluation Metrics**:
    - F1 score (threshold: 0.5)
 
+5. **Hyperparameters**:
+   - Hidden dimension: 16
+   - Number of layers: 4
+   - Attention heads: 4
+   - Dropout: 0.0 (GNN layers), 0.5 (attention final layer)
+   - Residual connections: Yes
+   
 ### **Ensemble Prediction**
 - Averages probability outputs from all 5 fold models
 - Final threshold: Top 5% of predicted scores (95th percentile)
@@ -84,32 +118,3 @@ The model processes financial data as a directed graph where:
 ### **Reproducibility**
 - Fixed random seed: 42
 - Deterministic CUDA operations enabled
-
----
-
-## 🚀 Usage
-
-```bash
-python main.py
-```
-
-**Outputs**:
-- `{exp_name}.csv`: Predictions for test accounts
-- `gnn_models/{exp_name}_fold_{i}.pt`: Saved model weights for each fold
-
----
-
-## 📁 Project Structure
-
-```
-ai-cup-2025/
-├── Model/
-│   └── gnn.py
-│   └── README.md
-├── Preprocess/
-│   └── prepare_data.py
-│   └── date_split.py
-│   └── README.md
-├── main.py
-├── README.md
-```
