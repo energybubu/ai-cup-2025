@@ -21,6 +21,15 @@ ai-cup-2025/
 ├── README.md
 ```
 
+### Model
+Define model sturcture for the project.
+
+### Preprocess
+Preprocess the officially provided data into desired format.
+
+### data
+Put the officially provided data here.
+
 ## Harware Required
 GPU with 24GB VRAM
 
@@ -34,6 +43,15 @@ pip install -r requirements.txt
 
 ## 🚀 Usage
 
+### Data Preprocess
+```bash
+cd Preprocess
+python data_split.py
+python prepare_data.py
+cd ..
+```
+
+### Train and Inference
 ```bash
 python main.py
 ```
