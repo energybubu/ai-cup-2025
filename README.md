@@ -9,6 +9,13 @@ ai-cup-2025/
 ├── Model/
 │   └── gnn.py
 │   └── README.md
+├── Preprocess
+│   └── prepare_data.ipynb
+│   └── prepare_data.py
+├── data (Put the officially provided data here)
+│   └── acct_alert.csv
+│   └── acct_predict.csv
+│   └── acct_transaction.csv
 ├── main.py
 ├── README.md
 ```
