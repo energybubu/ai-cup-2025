@@ -106,6 +106,10 @@ ai-cup-2025/
 ├── Model/
 │   └── gnn.py
 │   └── README.md
+├── Preprocess/
+│   └── prepare_data.py
+│   └── date_split.py
+│   └── README.md
 ├── main.py
 ├── README.md
 ```
