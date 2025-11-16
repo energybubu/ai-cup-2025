@@ -36,6 +36,7 @@ GPU with 24GB VRAM
 ## Environment
 ```
 conda create -n ai-cup-2025 python=3.12 -y
+conda activate ai-cup-2025
 pip install -r requirements.txt
 ```
 
