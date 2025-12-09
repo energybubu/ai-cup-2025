@@ -1,5 +1,8 @@
-torch==2.9.1
-torch_geometric==2.7.0
+torch==2.5.1
+torch_geometric==2.5.3
 scikit-learn==1.7.2
 datasets==4.0.0
 polars==1.34.0
+
+## After installing torch, install the following packages for PyG
+## pip install pyg-lib torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.5.1+cu121.html

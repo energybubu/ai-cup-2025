@@ -27,6 +27,34 @@ from torch_geometric.data import Data
 from Model.gnn import DirectedGINeWithAttention
 
 
+class GPUMonitor:
+    """Helper to track and log GPU memory usage throughout the pipeline."""
+    
+    def __init__(self, device):
+        self.device = device
+        self.enabled = device.type == 'cuda'
+
+    def log(self, stage: str):
+        """Prints current memory stats if running on CUDA."""
+        if not self.enabled:
+            return
+
+        # Synchronize to ensure accurate readings
+        torch.cuda.synchronize()
+        
+        allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+        reserved = torch.cuda.memory_reserved() / 1024**3    # GB
+        peak = torch.cuda.max_memory_allocated() / 1024**3   # GB
+        
+        print(f"== [GPU] {stage:<20} | Alloc: {allocated:5.2f} GB | "
+              f"Rsrv: {reserved:5.2f} GB | Peak: {peak:5.2f} GB ==")
+
+    def reset_peak(self):
+        """Resets the peak memory tracker."""
+        if self.enabled:
+            torch.cuda.reset_peak_memory_stats()
+
+
 def set_seed(seed=42):
     """Set random seeds for reproducibility across all libraries.
 
@@ -160,7 +188,7 @@ def get_node_and_edge_features(df, account_mapping):
     edge_df["sin_txn_time"] = sin
     edge_df["cos_txn_time"] = cos
     edge_df = edge_df.drop(columns=["txn_time"])
-    print(edge_df["sin_txn_time"])
+    # print(edge_df["sin_txn_time"])
 
     # Compute temporal features: time since previous transaction per account
     edge_df["time_delta_from"] = edge_df.groupby("from_acct")["timestamp"].diff()
@@ -220,6 +248,7 @@ def train_model_fullbatch(
     train_mask,
     optimizer,
     class_weight,
+    monitor=None,
 ):
     """Perform one epoch of full-batch training with weighted BCE loss.
 
@@ -240,6 +269,9 @@ def train_model_fullbatch(
     model.train()
     optimizer.zero_grad()
 
+    # Reset peak stats at start of epoch to see max usage per epoch
+    monitor.reset_peak() if monitor else None
+
     # Forward pass through the entire graph
     out = model(data.x, data.edge_index, data.edge_attr)
 
@@ -254,6 +286,8 @@ def train_model_fullbatch(
     # Backpropagation and optimization step
     total_loss.backward()
     optimizer.step()
+
+    monitor.log("After Backward") if monitor else None
 
     return total_loss.item()
 
@@ -379,7 +413,11 @@ def main():
 
     # Setup device (GPU if available)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    monitor = GPUMonitor(device)
+    monitor.log("Script Start")
+    
     data = data.to(device)
+    monitor.log("Data Loaded (GPU)")
 
     # Analyze training data distribution
     y_train = node_labels[train_mask]
@@ -447,7 +485,7 @@ def main():
         for epoch in range(2000):
             # Train for one epoch
             avg_loss = train_model_fullbatch(
-                model, data, fold_train_mask, optimizer, class_weight
+                model, data, fold_train_mask, optimizer, class_weight, monitor
             )
 
             # Evaluate every 50 epochs
@@ -477,6 +515,18 @@ def main():
         model.load_state_dict(best_model_state)
         models.append(model)
 
+    # for i in range(5):
+    #     models.append(
+    #         DirectedGINeWithAttention(
+    #             num_features=node_features.shape[1],
+    #             edge_dim=edge_features.shape[1],
+    #             num_gnn_layers=4,
+    #             dropout=0.0,
+    #             n_hidden=16,
+    #         ).to(device)
+    #     )
+    #     models[i].load_state_dict(torch.load(f"Model/gnn_models/edge_specific_norm_fold_{i}.pt", weights_only=True))
+
     # Generate ensemble predictions on test set
     test_preds = predict(models, data, test_mask)
 
@@ -498,7 +548,7 @@ def main():
     print(test_preds.mean())
 
     # Save results and models
-    exp_name = "edge_specific_norm"
+    exp_name = "edge_specific_norm_backup"
     results_df.to_csv(f"{exp_name}.csv", index=False)
 
     # Save each fold's model for potential later use or analysis

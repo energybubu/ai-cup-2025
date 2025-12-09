@@ -1,0 +1,9 @@
+Number of nodes: 1800106
+Number of edges: 4435890
+
+
+# Training Nodes
+Avg edges per node: 15.264116287231445
+Max edges per node: 2508
+Min edges per node: 1
+Median edges per node: 3
