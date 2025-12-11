@@ -58,9 +58,9 @@ class GPUMonitor:
 
 
 EDGE_MAX_NUM = 500
-NEIGHBOR_SAMPLING_SIZES = [10, 10, 10, 10]
-WINDOW = 20
-NON_ALERT_FILTER_RATIO = 0.5
+NEIGHBOR_SAMPLING_SIZES = [-1, -1, -1, -1]
+WINDOW = 30
+NON_ALERT_FILTER_RATIO = 0.0
 
 print("Using Neighbor Sampling Sizes:", NEIGHBOR_SAMPLING_SIZES)
 print("Using Edge Max Num:", EDGE_MAX_NUM)
@@ -178,21 +178,6 @@ def get_node_and_edge_features(df, account_mapping):
         elif account_mapping[str(i)][0] == 2:
             test_mask[i] = True
 
-    # Mask out high-degree nodes (>500 edges) from training
-    num_edges_per_node = torch.bincount(
-        edge_index[0], minlength=len(node_df)
-    ) + torch.bincount(edge_index[1], minlength=len(node_df))
-
-    high_degree_mask = num_edges_per_node > EDGE_MAX_NUM
-    num_high_degree = high_degree_mask.sum().item()
-    print(
-        f"Masking out {num_high_degree} nodes with more than {EDGE_MAX_NUM} edges from training"
-    )
-    # Count how many of the high-degree nodes are alert accounts (label=1)
-    high_degree_alerts = (high_degree_mask & (node_labels == 1)).sum().item()
-    print(f"Among them, {high_degree_alerts} are alert accounts")
-    train_mask = train_mask & ~high_degree_mask
-
     # Filter edges based on transaction time window
     # Set the time window to keep (in days)
     time_window_days = WINDOW  # You can adjust this value
@@ -237,6 +222,21 @@ def get_node_and_edge_features(df, account_mapping):
         edge_df[["from_acct", "to_acct"]].values.T, dtype=torch.long
     )
 
+    # Mask out high-degree nodes (>500 edges) from training
+    num_edges_per_node = torch.bincount(
+        edge_index[0], minlength=len(node_df)
+    ) + torch.bincount(edge_index[1], minlength=len(node_df))
+
+    high_degree_mask = num_edges_per_node > EDGE_MAX_NUM
+    num_high_degree = high_degree_mask.sum().item()
+    print(
+        f"Masking out {num_high_degree} nodes with more than {EDGE_MAX_NUM} edges from training"
+    )
+    # Count how many of the high-degree nodes are alert accounts (label=1)
+    high_degree_alerts = (high_degree_mask & (node_labels == 1)).sum().item()
+    print(f"Among them, {high_degree_alerts} are alert accounts")
+    train_mask = train_mask & ~high_degree_mask
+
     # Compute Number of edges per train nodes:
     num_edges_per_node = torch.bincount(
         edge_index[0], minlength=len(node_df)
@@ -246,14 +246,6 @@ def get_node_and_edge_features(df, account_mapping):
     print("Max edges per node:", num_edges_per_node[train_mask].max().item())
     print("Min edges per node:", num_edges_per_node[train_mask].min().item())
     print("Median edges per node:", num_edges_per_node[train_mask].median().item())
-
-    plt.figure(figsize=(10, 6))
-    plt.hist(num_edges_per_node[train_mask].numpy(), bins=100, log=True)
-    plt.title("Distribution of Edges per Training Node")
-    plt.xlabel("Number of Edges")
-    plt.ylabel("Count (Log Scale)")
-    plt.savefig("edge_distribution.png")
-    print("Distribution plot saved to edge_distribution.png")
 
     return (
         node_features,
@@ -338,9 +330,6 @@ def predict_minibatch(models, data, input_mask, device, monitor):
         input_nodes=input_mask,
         shuffle=False,
         num_workers=0,
-        time_attr="time",
-        temporal_strategy="last",  # Get most recent edges ('last' or 'uniform')
-        is_sorted=True,
     )
 
     ensemble_probs = []
@@ -402,6 +391,12 @@ def main():
     # To visualize the difference between 'Allocated' (used by tensors)
     # and 'Reserved' (cached by allocator) memory.
 
+    y_train = node_labels[train_mask]
+    class_counts = np.bincount(y_train)
+    class_weight = torch.tensor(
+        [1.0, class_counts[0] / (class_counts[1] + 1e-6)], dtype=torch.float
+    )
+
     train_indices = torch.where(train_mask)[0].numpy()
     X_train_dummy = np.zeros(len(train_indices))
     y_train_array = node_labels[train_indices].numpy()
@@ -409,11 +404,6 @@ def main():
     n_splits = 5
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     models = []
-
-    # Configuration for randomly filtering non-alert nodes
-    non_alert_filter_percentage = (
-        NON_ALERT_FILTER_RATIO  # Adjust this value (e.g., 0.5 for 50%)
-    )
 
     for fold, (train_idx_local, val_idx_local) in enumerate(
         tqdm(skf.split(X_train_dummy, y_train_array), desc="Folds")
@@ -424,83 +414,41 @@ def main():
         gc.collect()
         torch.cuda.empty_cache()
         monitor.reset_peak()
+        # monitor.log("Start Fold")
 
         global_train_idx = torch.tensor(train_indices[train_idx_local])
         global_val_idx = torch.tensor(train_indices[val_idx_local])
 
-        # Randomly filter out n% of non-alert nodes from this fold's training set
-        if non_alert_filter_percentage > 0:
-            train_labels = node_labels[global_train_idx]
-            non_alert_mask_local = train_labels == 0
-            non_alert_indices_local = torch.where(non_alert_mask_local)[0]
-            num_non_alert = len(non_alert_indices_local)
-            num_to_filter = int(num_non_alert * non_alert_filter_percentage)
-
-            # Randomly select indices to filter out (using fold-specific seed for reproducibility)
-            torch.manual_seed(42 + fold)
-            filter_indices_local = non_alert_indices_local[
-                torch.randperm(num_non_alert)[:num_to_filter]
-            ]
-
-            # Create filter mask and remove selected non-alert nodes
-            keep_mask = torch.ones(len(global_train_idx), dtype=torch.bool)
-            keep_mask[filter_indices_local] = False
-            global_train_idx = global_train_idx[keep_mask]
-
-            print(
-                f"Randomly filtered out {num_to_filter} ({non_alert_filter_percentage * 100:.1f}%) "
-                f"non-alert nodes from fold {fold + 1} training set"
-            )
-            print(
-                f"Training set size: {len(train_idx_local)} -> {len(global_train_idx)}"
-            )
-
-            # Reset seed for deterministic training
-            set_seed(42)
-
-        # Calculate class weight based on filtered training set for this fold
-        y_train_fold = node_labels[global_train_idx]
-        class_counts_fold = np.bincount(y_train_fold)
-        class_weight = torch.tensor(
-            [1.0, class_counts_fold[0] / (class_counts_fold[1] + 1e-6)],
-            dtype=torch.float,
-        )
-        print(
-            f"Fold {fold + 1} class distribution: {class_counts_fold}, weight: {class_weight[1].item():.2f}"
-        )
-
         train_loader = NeighborLoader(
             data,
             num_neighbors=NEIGHBOR_SAMPLING_SIZES,
-            # num_workers=0,  # Added parallel workers
-            # persistent_workers=True,  # Keep workers alive
             batch_size=len(global_train_idx),
             input_nodes=global_train_idx,
             shuffle=True,
+            num_workers=0,
         )
 
         val_loader = NeighborLoader(
             data,
             num_neighbors=NEIGHBOR_SAMPLING_SIZES,
-            # num_workers=0,  # Added parallel workers
-            # persistent_workers=True,  # Keep workers alive
             batch_size=len(global_val_idx),
             input_nodes=global_val_idx,
             shuffle=False,
+            num_workers=0,
         )
 
         model = DirectedGINeWithAttention(
             num_features=node_features.shape[1],
             edge_dim=edge_features.shape[1],
             num_gnn_layers=4,
-            final_dropout=0.2,
             dropout=0.0,
             n_hidden=16,
         ).to(device)
 
         # Log model memory footprint
+        # monitor.log("Model Init")
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="max", factor=0.5, patience=5
         )
@@ -516,6 +464,7 @@ def main():
             )
 
             if (epoch + 1) % 50 == 0:
+                # monitor.log(f"End Epoch {epoch + 1} Training")
                 val_f1, val_auc, _, _ = evaluate_model_minibatch(
                     model, val_loader, device, monitor
                 )
@@ -526,6 +475,8 @@ def main():
                 )
 
                 # Check peak usage occasionally
+                # if (epoch + 1) % 50 == 0:
+                #     monitor.log(f"End Epoch {epoch + 1}")
 
                 if val_f1 > best_f1:
                     best_f1 = val_f1
@@ -543,9 +494,10 @@ def main():
         models.append(model)
 
         # Explicitly delete model and optimizer to free GPU memory for next fold
-        # del model
-        # del optimizer
-        # del scheduler
+        del model
+        del optimizer
+        del scheduler
+        # monitor.log("End Fold Cleanup")
 
     print("\n--- Starting Inference ---")
     test_preds = predict_minibatch(models, data, test_mask, device, monitor)
