@@ -273,6 +273,8 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     total_duration = node_df['dur_sum_from'] + node_df['dur_sum_to']
     node_df['reg_avg_duration'] = total_duration / node_df['reg_total_count']
     node_df['reg_avg_duration'] = node_df['reg_avg_duration'].fillna(0) # 處理 0/0 的情況
+    node_df['reg_min_duration'] = node_df[['dur_sum_from', 'dur_sum_to']].min(axis=1).fillna(0)
+    node_df['reg_max_duration'] = node_df[['dur_sum_from', 'dur_sum_to']].max(axis=1).fillna(0)
 
     # --- 4. 組合 Node Features ---
     # Part A: 原本的帳戶類型 (One-hot)
@@ -280,7 +282,7 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     
     # Part B: 新增的數值特徵
     # 選取你要的特徵欄位
-    reg_feature_cols = ['reg_total_count', 'count_from', 'count_to', 'reg_avg_duration']
+    reg_feature_cols = ['count_from', 'count_to', 'reg_avg_duration', 'reg_min_duration', 'reg_max_duration']
     
     # 標準化 (StandardScaler) 讓數值分佈比較好訓練
     scaler = StandardScaler()
