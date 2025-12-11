@@ -19,12 +19,11 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
-from torch_geometric.data import Data, HeteroData
+from torch_geometric.data import Data
 from torch_geometric.loader import NeighborLoader
 from tqdm import tqdm, trange
 
-from Model.gnn import DirectedGINeWithAttention, DualChannelDirectedGIN
-
+from Model.gnn import DirectedGINeWithAttention
 
 
 class GPUMonitor:
@@ -59,11 +58,8 @@ class GPUMonitor:
 
 EDGE_MAX_NUM = 500
 WINDOW = 30  # days
-NEIGHBOR_SAMPLE_SIZES = [100, 10, 5, 5]
+NEIGHBOR_SAMPLE_SIZES = [-1, -1, -1, -1]
 NON_ALERT_FILTER_RATIO = 0.0
-FOLD = 6
-EPOCH = 2000
-PREDICT_STRATEGY = "5%"
 
 print(f"Non-alert node filtering ratio: {NON_ALERT_FILTER_RATIO}")
 print(f"Edge max num for train mask: {EDGE_MAX_NUM}")
@@ -112,8 +108,7 @@ def convert_timestamp_to_cyclical(txn_time: str):
     return sin_time, cos_time
 
 
-def get_node_and_edge_features(df, register_df, account_mapping):
-    print("Preparing node and edge features...")
+def get_node_and_edge_features(df, account_mapping):
     from_nodes = df[["from_acct", "from_acct_type"]].rename(
         columns={"from_acct": "acct", "from_acct_type": "acct_type"}
     )
@@ -121,76 +116,16 @@ def get_node_and_edge_features(df, register_df, account_mapping):
         columns={"to_acct": "acct", "to_acct_type": "acct_type"}
     )
 
-    register_from_accts = register_df[["from_acct", "from_acct_type"]].rename(columns={"from_acct": "acct", "from_acct_type": "acct_type"})
-    register_to_accts = register_df[["to_acct", "to_acct_type"]].rename(columns={"to_acct": "acct", "to_acct_type": "acct_type"})
-
     node_df = (
-        pd.concat([from_nodes, to_nodes, register_from_accts, register_to_accts], ignore_index=True)
+        pd.concat([from_nodes, to_nodes], ignore_index=True)
         .drop_duplicates(subset="acct")
         .reset_index(drop=True)
     )
-    print("Number of nodes:", len(node_df))
+    # print("Number of nodes:", len(node_df))
 
-    # --- 2. [新增] 處理 Register DF 的統計特徵 ---
-    # 目標：算出每個帳號在約定轉帳中的行為特徵
-    
-    reg_df = register_df.copy()
-    # 計算約定轉帳的時間跨度
-    reg_df['duration'] = reg_df['end_date'] - reg_df['start_date']
-
-    # 針對 'from_acct' 聚合：作為發起方幾次？總持續時間？
-    from_stats = reg_df.groupby('from_acct').agg(
-        count_from=('to_acct', 'count'),
-        dur_sum_from=('duration', 'sum')
-    )
-    
-    # 針對 'to_acct' 聚合：作為接收方幾次？總持續時間？
-    to_stats = reg_df.groupby('to_acct').agg(
-        count_to=('from_acct', 'count'),
-        dur_sum_to=('duration', 'sum')
-    )
-
-    # 將統計結果合併回 node_df
-    # 使用 left join，因為有些帳號可能根本不在 register_df 裡 (補 0)
-    node_df = node_df.merge(from_stats, left_on='acct', right_index=True, how='left')
-    node_df = node_df.merge(to_stats, left_on='acct', right_index=True, how='left')
-
-    # 填補缺失值 (沒出現過代表次數為 0)
-    fill_cols = ['count_from', 'dur_sum_from', 'count_to', 'dur_sum_to']
-    node_df[fill_cols] = node_df[fill_cols].fillna(0)
-
-    # --- 3. [新增] 衍生特徵計算 ---
-    # 總約定次數
-    node_df['reg_total_count'] = node_df['count_from'] + node_df['count_to']
-    
-    # 平均約定時間跨度 (避免除以零)
-    total_duration = node_df['dur_sum_from'] + node_df['dur_sum_to']
-    node_df['reg_avg_duration'] = total_duration / node_df['reg_total_count']
-    node_df['reg_avg_duration'] = node_df['reg_avg_duration'].fillna(0) # 處理 0/0 的情況
-    node_df['reg_min_duration'] = node_df[['dur_sum_from', 'dur_sum_to']].min(axis=1).fillna(0)
-    node_df['reg_max_duration'] = node_df[['dur_sum_from', 'dur_sum_to']].max(axis=1).fillna(0)
-
-    # --- 4. 組合 Node Features ---
-    # Part A: 原本的帳戶類型 (One-hot)
-    type_dummies = pd.get_dummies(node_df["acct_type"], prefix="acct_type")
-    
-    # Part B: 新增的數值特徵
-    # 選取你要的特徵欄位
-    reg_feature_cols = ['count_from', 'count_to', 'reg_avg_duration', 'reg_min_duration', 'reg_max_duration']
-    
-    # 標準化 (StandardScaler) 讓數值分佈比較好訓練
-    scaler = StandardScaler()
-    reg_features_scaled = scaler.fit_transform(node_df[reg_feature_cols])
-    reg_features_df = pd.DataFrame(reg_features_scaled, columns=reg_feature_cols)
-
-    # 合併 A + B
-    final_node_features_df = pd.concat([type_dummies, reg_features_df], axis=1)
-    final_node_features_df = final_node_features_df.astype(float)
-    print(final_node_features_df.head())
-    
-    # 轉為 Tensor
-    node_features = torch.tensor(final_node_features_df.values, dtype=torch.float)
-    print(f"Node features shape: {node_features.shape}")
+    node_features = pd.get_dummies(node_df[["acct_type"]], prefix="acct_type")
+    node_features.index = node_df["acct"]
+    node_features = torch.tensor(node_features.values, dtype=torch.float)
 
     edge_df = df[
         [
@@ -217,16 +152,16 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     # Save original timestamp before scaling for later edge filtering
     edge_df["timestamp_original"] = edge_df["timestamp"]
 
-    num_cols = ["txn_amt_to_twd", "timestamp", "time_delta_from", "time_delta_to", "sin_txn_time", "cos_txn_time"]
-    scale_cols = ["txn_amt_to_twd", "timestamp", "time_delta_from", "time_delta_to"]
+    num_cols = ["txn_amt_to_twd", "timestamp", "time_delta_from", "time_delta_to"]
     edge_df[num_cols] = edge_df[num_cols].fillna(0)
     st_scaler = StandardScaler()
-    edge_df[scale_cols] = st_scaler.fit_transform(edge_df[scale_cols])
+    edge_df[num_cols] = st_scaler.fit_transform(edge_df[num_cols])
 
     edge_cats = pd.get_dummies(
         edge_df[["is_self_txn", "currency_type", "channel_type"]],
         columns=["is_self_txn", "currency_type", "channel_type"],
     )
+    num_cols += ["sin_txn_time", "cos_txn_time"]
 
     edge_features_df = pd.concat([edge_df[num_cols], edge_cats], axis=1)
     edge_features_df = edge_features_df.select_dtypes(
@@ -237,8 +172,7 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     edge_index = torch.tensor(
         edge_df[["from_acct", "to_acct"]].values.T, dtype=torch.long
     )
-
-    print("Number of edges:", edge_index.shape[1])
+    # print("Number of edges:", edge_index.shape[1])
 
     num_nodes = len(node_df)
     node_labels = torch.zeros(num_nodes, dtype=int)
@@ -312,8 +246,19 @@ def get_node_and_edge_features(df, register_df, account_mapping):
         print(f"Among them, {high_degree_alerts} are alert accounts")
         train_mask = train_mask & ~high_degree_mask
 
-    return node_features, edge_index, edge_features, node_labels, train_mask, test_mask
+    # Compute Number of edges per train nodes:
+    # num_edges_per_node = torch.zeros(len(node_df), dtype=torch.long)
+    # for i in range(edge_index.shape[1]):
+    #     from_node = edge_index[0, i]
+    #     to_node = edge_index[1, i]
+    #     num_edges_per_node[from_node] += 1
+    #     num_edges_per_node[to_node] += 1
+    # print("Avg edges per node:", num_edges_per_node[train_mask].float().mean().item())
+    # print("Max edges per node:", num_edges_per_node[train_mask].max().item())
+    # print("Min edges per node:", num_edges_per_node[train_mask].min().item())
+    # print("Median edges per node:", num_edges_per_node[train_mask].median().item())
 
+    return node_features, edge_index, edge_features, node_labels, train_mask, test_mask
 
 
 def train_model_minibatch(model, loader, optimizer, device, class_weight, monitor):
@@ -333,6 +278,7 @@ def train_model_minibatch(model, loader, optimizer, device, class_weight, monito
 
         # Forward pass
         out = model(batch.x, batch.edge_index, batch.edge_attr)
+
         batch_size = batch.batch_size
         out_seed = out[:batch_size]
         y_seed = batch.y[:batch_size]
@@ -349,6 +295,9 @@ def train_model_minibatch(model, loader, optimizer, device, class_weight, monito
         total_loss += loss.item() * batch_size
         total_examples += batch_size
 
+        # Log memory for the first batch to ensure graph fits
+        # if i == 0:
+        #     monitor.log("End of 1st Batch")
 
     return total_loss / total_examples
 
@@ -363,12 +312,12 @@ def evaluate_model_minibatch(model, loader, device, monitor):
         for i, batch in enumerate(loader):
             batch = batch.to(device)
             out = model(batch.x, batch.edge_index, batch.edge_attr)
-            
             batch_size = batch.batch_size
             prob = torch.sigmoid(out[:batch_size])
 
             y_true_all.append(batch.y[:batch_size].cpu())
             y_prob_all.append(prob.squeeze().cpu())
+            # monitor.log(f"After Batch {i}")
 
     y_true = torch.cat(y_true_all).numpy()
     y_prob = torch.cat(y_prob_all).numpy()
@@ -385,8 +334,7 @@ def predict_minibatch(models, data, input_mask, device, monitor):
     loader = NeighborLoader(
         data,
         num_neighbors=[-1, -1, -1, -1],
-        batch_size=input_mask.sum().item(),
-        # input_nodes=("account", input_mask),
+        batch_size=8192,
         input_nodes=input_mask,
         shuffle=False,
         num_workers=0,
@@ -401,7 +349,7 @@ def predict_minibatch(models, data, input_mask, device, monitor):
             for batch in loader:
                 batch = batch.to(device)
                 out = model(batch.x, batch.edge_index, batch.edge_attr)
-                prob = torch.sigmoid(out[:batch.batch_size]).squeeze().cpu()
+                prob = torch.sigmoid(out[: batch.batch_size]).squeeze().cpu()
                 model_probs.append(prob)
 
         full_model_probs = torch.cat(model_probs)
@@ -414,7 +362,7 @@ def predict_minibatch(models, data, input_mask, device, monitor):
     # monitor.log("End Inference")
     ensemble_probs = torch.stack(ensemble_probs, dim=0)
     mean_prob = ensemble_probs.mean(dim=0)
-    threshold = torch.quantile(mean_prob, 0.95) if PREDICT_STRATEGY == "5%" else 0.5
+    threshold = torch.quantile(mean_prob, 0.95)
     preds = (mean_prob >= threshold).int()
 
     return preds.numpy()
@@ -422,8 +370,6 @@ def predict_minibatch(models, data, input_mask, device, monitor):
 
 def main():
     set_seed(42)
-    exp_name = f"minibatch_window{WINDOW}_edge{EDGE_MAX_NUM}_1fold_{NEIGHBOR_SAMPLE_SIZES[0]}neighbors"
-    os.makedirs("gnn_models", exist_ok=True)
 
     # Initialize GPU Monitor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -431,13 +377,12 @@ def main():
     # monitor.log("Script Start")
 
     # Load Data
-    df = pd.read_csv("data/formatted_transaction_register.csv")
-    register_df = pd.read_csv("data/formatted_register.csv")
-    with open("data/account_mapping_register.json", "r") as f:
+    df = pd.read_csv("data/formatted_transaction.csv")
+    with open("data/account_mapping.json", "r") as f:
         account_mapping = json.load(f)
 
     node_features, edge_index, edge_features, node_labels, train_mask, test_mask = (
-        get_node_and_edge_features(df, register_df, account_mapping)
+        get_node_and_edge_features(df, account_mapping)
     )
 
     data = Data(
@@ -448,6 +393,7 @@ def main():
         train_mask=train_mask,
         test_mask=test_mask,
     )
+    # monitor.log("Data Loaded (CPU)")
 
     # To visualize the difference between 'Allocated' (used by tensors)
     # and 'Reserved' (cached by allocator) memory.
@@ -462,7 +408,7 @@ def main():
     X_train_dummy = np.zeros(len(train_indices))
     y_train_array = node_labels[train_indices].numpy()
 
-    n_splits = FOLD
+    n_splits = 5
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     models = []
 
@@ -526,7 +472,7 @@ def main():
 
         train_loader = NeighborLoader(
             data,
-            num_neighbors=NEIGHBOR_SAMPLE_SIZES,
+            num_neighbors=[-1, -1, -1, -1],
             batch_size=len(global_train_idx),
             input_nodes=global_train_idx,
             shuffle=True,
@@ -550,6 +496,9 @@ def main():
             n_hidden=16,
         ).to(device)
 
+        # Log model memory footprint
+        # monitor.log("Model Init")
+
         optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="max", factor=0.5, patience=5
@@ -560,12 +509,13 @@ def main():
         patience = 20
         patience_counter = 0
 
-        for epoch in trange(EPOCH):
+        for epoch in trange(2000):
             avg_loss = train_model_minibatch(
                 model, train_loader, optimizer, device, class_weight, monitor
             )
 
             if (epoch + 1) % 50 == 0:
+                # monitor.log(f"End Epoch {epoch + 1} Training")
                 val_f1, val_auc, _, _ = evaluate_model_minibatch(
                     model, val_loader, device, monitor
                 )
@@ -574,6 +524,10 @@ def main():
                 print(
                     f"Epoch {epoch + 1:3d} | Loss: {avg_loss:.4f} | Val F1: {val_f1:.4f} | Val AUC: {val_auc:.4f}"
                 )
+
+                # Check peak usage occasionally
+                # if (epoch + 1) % 50 == 0:
+                #     monitor.log(f"End Epoch {epoch + 1}")
 
                 if val_f1 > best_f1:
                     best_f1 = val_f1
@@ -588,10 +542,13 @@ def main():
 
         print("best val F1:", best_f1)
         model.load_state_dict(best_model_state)
-        torch.save(model.state_dict(), f"gnn_models/{exp_name}_fold_{fold}.pt")
-        print(f"fold_{fold} model saved.")
         models.append(model)
-        break
+
+        # Explicitly delete model and optimizer to free GPU memory for next fold
+        # del model
+        # del optimizer
+        # del scheduler
+        # monitor.log("End Fold Cleanup")
 
     print("\n--- Starting Inference ---")
     test_preds = predict_minibatch(models, data, test_mask, device, monitor)
@@ -605,7 +562,13 @@ def main():
     print(f"Pred Sum: {test_preds.sum()}")
     print(f"Pred Mean: {test_preds.mean()}")
 
-    results_df.to_csv(f"工作坊_result.csv", index=False)
+    exp_name = "minibatch_ensemble_gpu_monitored"
+    results_df.to_csv(f"{exp_name}.csv", index=False)
+
+    os.makedirs("gnn_models", exist_ok=True)
+    for i, model in enumerate(models):
+        torch.save(model.state_dict(), f"gnn_models/{exp_name}_fold_{i}.pt")
+    print("GNN models saved.")
 
 
 if __name__ == "__main__":
