@@ -77,7 +77,7 @@ def convert_timestamp_to_cyclical(txn_time: str):
     return sin_time, cos_time
 
 
-def get_node_and_edge_features(df, register_df, account_mapping):
+def get_node_and_edge_features_special(df, register_df, account_mapping):
     print("Preparing node and edge features...")
     from_nodes = df[["from_acct", "from_acct_type"]].rename(
         columns={"from_acct": "acct", "from_acct_type": "acct_type"}
@@ -218,7 +218,7 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     return node_features, edge_index, edge_features, special_edge_index, special_edge_features, node_labels, train_mask, test_mask
 
 
-def get_node_and_edge_features_original(df, register_df, account_mapping):
+def get_node_and_edge_features(df, register_df, account_mapping):
     print("Preparing node and edge features...")
     from_nodes = df[["from_acct", "from_acct_type"]].rename(
         columns={"from_acct": "acct", "from_acct_type": "acct_type"}
@@ -236,10 +236,6 @@ def get_node_and_edge_features_original(df, register_df, account_mapping):
         .reset_index(drop=True)
     )
     print("Number of nodes:", len(node_df))
-
-    # node_features = pd.get_dummies(node_df[["acct_type"]], prefix="acct_type")
-    # node_features.index = node_df["acct"]
-    # node_features = torch.tensor(node_features.values, dtype=torch.float)
 
     # --- 2. [新增] 處理 Register DF 的統計特徵 ---
     # 目標：算出每個帳號在約定轉帳中的行為特徵
@@ -511,7 +507,7 @@ def predict_minibatch(models, data, input_mask, device, monitor):
                 prob = torch.sigmoid(out[:batch.batch_size]).squeeze().cpu()
                 # batch_size = batch['account'].batch_size
                 # prob = torch.sigmoid(out[:batch_size]).squeeze().cpu()
-                # model_probs.append(prob)
+                model_probs.append(prob)
         
         full_model_probs = torch.cat(model_probs)
         ensemble_probs.append(full_model_probs)
@@ -546,7 +542,7 @@ def main():
         account_mapping = json.load(f)
 
     node_features, edge_index, edge_features, node_labels, train_mask, test_mask = (
-        get_node_and_edge_features_original(df, register_df, account_mapping)
+        get_node_and_edge_features(df, register_df, account_mapping)
     )
 
     data = Data(
@@ -697,6 +693,7 @@ def main():
         print("best val F1:", best_f1)
         model.load_state_dict(best_model_state)
         torch.save(model.state_dict(), f"gnn_models/{exp_name}_fold_{fold}.pt")
+        print(f"fold_{fold} model saved.")
         models.append(model)
         
         # Explicitly delete model and optimizer to free GPU memory for next fold
@@ -723,7 +720,7 @@ def main():
     # os.makedirs("gnn_models", exist_ok=True)
     # # for i, model in enumerate(models):
     # #     torch.save(model.state_dict(), f"gnn_models/{exp_name}_fold_{i}.pt")
-    print("GNN models saved.")
+    # print("GNN models saved.")
 
 if __name__ == "__main__":
     main()
