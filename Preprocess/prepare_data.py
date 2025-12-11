@@ -13,74 +13,54 @@ def convert_to_minutes(row):
 
 def load_data():
     """Load datasets and prepare account split and label mappings."""
-    # test_ds = load_dataset("acct-fraud-agg-v2", split="test", token=True)
-    # alert = load_dataset("fintech-final", split="alert", token=True)
-    # non_alert = load_dataset("fintech-final", split="non_alert", token=True)
-    test_ds = load_from_disk("acct-fraud-agg-v2")["test"]
-    alert = load_from_disk("fintech-final")["alert"]
-    non_alert = load_from_disk("fintech-final")["non_alert"]
+    test_ds = load_from_disk("acct-fraud-agg-v2_register")["test"]
+    alert = load_from_disk("fintech-final_register")["alert"]
+    non_alert = load_from_disk("fintech-final_register")["non_alert"]
 
     # Deterministic seed for reproducible splits
     seed = 42
-    non_alert_split = non_alert.train_test_split(test_size=len(alert)*19, seed=seed)
-    non_alert_train = non_alert_split["train"]
-    non_alert_dev = non_alert_split["test"]
+    # non_alert_split = non_alert.train_test_split(test_size=len(alert)*19, seed=seed)
+    # non_alert_train = non_alert_split["train"]
+    # non_alert_dev = non_alert_split["test"]
 
-    train_ds = non_alert_train
-    dev_ds = concatenate_datasets([alert, non_alert_dev])
+    # train_ds = non_alert_train
+    # dev_ds = concatenate_datasets([alert, non_alert_dev])
 
     acct_to_split = {}
     acct_to_label = {}
-    for example in train_ds:
-        acct_to_split[example["acct"]] = 0
-        acct_to_label[example["acct"]] = example["label"]
-    for example in dev_ds:
+    # for example in train_ds:
+    #     acct_to_split[example["acct"]] = 0
+    #     acct_to_label[example["acct"]] = example["label"]
+    # for example in dev_ds:
+    #     acct_to_split[example["acct"]] = 1
+    #     acct_to_label[example["acct"]] = example["label"]
+
+    for example in alert:
         acct_to_split[example["acct"]] = 1
-        acct_to_label[example["acct"]] = example["label"]
+        acct_to_label[example["acct"]] = 1
+    for example in non_alert:
+        acct_to_split[example["acct"]] = 1
+        acct_to_label[example["acct"]] = 0
     for example in test_ds:
         acct_to_split[example["acct"]] = 2
         acct_to_label[example["acct"]] = -1
 
+    register_df = pd.read_csv("../data/acct_register.csv")
+    # collect all accounts in register file
+    for _, row in register_df.iterrows():
+        if row["from_acct"] not in acct_to_split:
+            acct_to_split[row["from_acct"]] = 1
+            acct_to_label[row["from_acct"]] = 0
+        if row["to_acct"] not in acct_to_split:
+            acct_to_split[row["to_acct"]] = 1
+            acct_to_label[row["to_acct"]] = 0
+
     df = pd.read_csv("../data/acct_transaction.csv")
-    return df, acct_to_split, acct_to_label
+    return df, register_df, acct_to_split, acct_to_label
 
 
-def preprocess_data(df, acct_to_split, acct_to_label):
+def preprocess_data(df, register_df, acct_to_split, acct_to_label):
     """"Preprocess the transaction data and save the formatted data and account mapping."""
-    currency_mapping = {
-        'TWD': 0,
-        'USD': 1,
-        'AUD': 2,
-        'JPY': 3,
-        'CNY': 4,
-        'GBP': 5,
-        'EUR': 6,
-        'HKD': 7,
-        'THB': 8,
-        'SGD': 9,
-        'SEK': 10,
-        'NZD': 11,
-        'CAD': 12,
-        'ZAR': 13,
-        'CHF': 14,
-        'MXN': 15
-    }
-    channel_mapping = {
-        "01": 0,
-        "02": 1,
-        "03": 2,
-        "04": 3,
-        "05": 4,
-        "06": 5,
-        "07": 6,
-        "99": 7,
-        "UNK": 8
-    }
-    self_mapping = {
-        "Y": 0,
-        "N": 1,
-        "UNK": 2
-    }
 
     # Exchange rates TWD → other currencies
     rates_to_twd = {
@@ -111,10 +91,18 @@ def preprocess_data(df, acct_to_split, acct_to_label):
     from_accts = df[["from_acct", "from_acct_type"]]
     to_accts = df[["to_acct", "to_acct_type"]]
 
+    # register_df has no acct_type, fill with nan/default value
+    register_df["from_acct_type"] = 1
+    register_df["to_acct_type"] = 1
+    register_from_accts = register_df[["from_acct", "from_acct_type"]].rename(columns={"from_acct": "acct", "from_acct_type": "acct_type"})
+    register_to_accts = register_df[["to_acct", "to_acct_type"]].rename(columns={"to_acct": "acct", "to_acct_type": "acct_type"})
+
     # stack all accounts together
     all_accts = pd.concat([
         from_accts.rename(columns={"from_acct": "acct", "from_acct_type": "acct_type"}),
-        to_accts.rename(columns={"to_acct": "acct", "to_acct_type": "acct_type"})
+        to_accts.rename(columns={"to_acct": "acct", "to_acct_type": "acct_type"}),
+        register_from_accts,
+        register_to_accts
     ], ignore_index=True)
 
     # 2. Drop duplicates while keeping the first type seen
@@ -125,11 +113,14 @@ def preprocess_data(df, acct_to_split, acct_to_label):
 
     # 4. Build mapping dicts
     acct_to_id = dict(zip(unique_accts["acct"], unique_accts["acct_id"]))
-    acct_to_type = dict(zip(unique_accts["acct"], unique_accts["acct_type"]))
+    # acct_to_type = dict(zip(unique_accts["acct"], unique_accts["acct_type"]))
 
     # 5. Map IDs back to df
     df["from_acct"] = df["from_acct"].map(acct_to_id)
     df["to_acct"] = df["to_acct"].map(acct_to_id)
+
+    register_df["from_acct"] = register_df["from_acct"].map(acct_to_id)
+    register_df["to_acct"] = register_df["to_acct"].map(acct_to_id)
 
     # (Optional) reconstruct `account_mapping` dict for later use
     account_mapping = {acct_to_id[acct]: (acct_to_split.get(acct, -1), acct_to_label.get(acct, 0), acct) for acct in acct_to_id}
@@ -140,14 +131,15 @@ def preprocess_data(df, acct_to_split, acct_to_label):
     )
 
     df["timestamp"] = df.apply(convert_to_minutes, axis=1)
-    df.to_csv("../data/formatted_transaction.csv")
+    df.to_csv("../data/formatted_transaction_register.csv")
+    register_df.to_csv("../data/formatted_register.csv")
 
-    with open("../data/account_mapping.json", "w") as f:
+    with open("../data/account_mapping_register.json", "w") as f:
         json.dump(account_mapping, f, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":
     """Main function to load and preprocess data."""
     
-    df, acct_to_split, acct_to_label = load_data()
-    preprocess_data(df, acct_to_split, acct_to_label)    
+    df, register_df, acct_to_split, acct_to_label = load_data()
+    preprocess_data(df, register_df, acct_to_split, acct_to_label)    

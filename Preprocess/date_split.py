@@ -154,7 +154,7 @@ def store_alert_and_non_alert_data(aggregated_data, alerts):
             "non_alert": non_alert_dataset,
         }
     )
-    dataset_dict.save_to_disk("fintech-final")
+    dataset_dict.save_to_disk("fintech-final_register")
     return all_accts, non_alerted_accts
 
 
@@ -165,142 +165,142 @@ def split_and_store_data(
 ):
     """Split data into train/dev sets and store to disk."""
 
-    print("Splitting data into train/dev sets...")
+    # print("Splitting data into train/dev sets...")
     # 2. Randomly sample alerted accounts into train/dev sets
     # We'll randomly sample 80% of alerted events for training and use the remaining 20% for dev.
     # Use a fixed random_state for reproducibility.
-    train_alerts = alerts.sample(frac=0.8, random_state=42)
-    dev_alerts = alerts.drop(train_alerts.index)
+    # train_alerts = alerts.sample(frac=0.8, random_state=42)
+    # dev_alerts = alerts.drop(train_alerts.index)
 
     # up-sample train set to 3x
-    train_alerts = pd.concat([train_alerts] * 3, ignore_index=True)
+    # train_alerts = pd.concat([train_alerts] * 3, ignore_index=True)
 
     # Sort and reset indices for downstream consistency
-    train_alerts = train_alerts.sort_values("event_date").reset_index(drop=True)
-    dev_alerts = dev_alerts.sort_values("event_date").reset_index(drop=True)
+    # train_alerts = train_alerts.sort_values("event_date").reset_index(drop=True)
+    # dev_alerts = dev_alerts.sort_values("event_date").reset_index(drop=True)
 
-    print("Number of alerted accounts total:", len(alerts))
-    print("Number of alerted accounts in training sample:", len(train_alerts))
-    print("Number of alerted accounts in dev sample:", len(dev_alerts))
+    # print("Number of alerted accounts total:", len(alerts))
+    # print("Number of alerted accounts in training sample:", len(train_alerts))
+    # print("Number of alerted accounts in dev sample:", len(dev_alerts))
 
     # # Determine the cutoff date for non-alerted accounts
     # cutoff_date = train_alerts["event_date"].max()
 
     # Get the sets of alerted accounts
-    train_alerted_accts = set(train_alerts["acct"])
-    dev_alerted_accts = set(dev_alerts["acct"])
-    print("Number of alerted accounts in training set:", len(train_alerted_accts))
-    print("Number of alerted accounts in dev set:", len(dev_alerted_accts))
+    # train_alerted_accts = set(train_alerts["acct"])
+    # dev_alerted_accts = set(dev_alerts["acct"])
+    # print("Number of alerted accounts in training set:", len(train_alerted_accts))
+    # print("Number of alerted accounts in dev set:", len(dev_alerted_accts))
 
     # Prepare training and dev data lists
-    train_data = []
-    dev_data = []
+    # train_data = []
+    # dev_data = []
 
     # Get Train/Dev non-alerted accounts
     # Split into 8/2 and then random sample 19x of the alerted accounts from it.
-    split_idx = int(0.8 * len(non_alerted_accts))
-    non_alerted_accts_list = list(non_alerted_accts)
-    rng.shuffle(non_alerted_accts_list)
-    train_non_alerted_accts = non_alerted_accts_list[:split_idx]
-    sampled_train_non_alerted_accts = rng.choice(
-        train_non_alerted_accts, size=19 * len(train_alerted_accts), replace=False
-    )
-    dev_non_alerted_accts = non_alerted_accts_list[split_idx:]
-    sampled_dev_non_alerted_accts = rng.choice(
-        dev_non_alerted_accts, size=19 * len(dev_alerted_accts), replace=False
-    )
-    assert (
-        set(sampled_train_non_alerted_accts) & set(sampled_dev_non_alerted_accts) == set()
-    )
-    assert len(sampled_train_non_alerted_accts) == 19 * len(train_alerted_accts)
-    assert len(sampled_dev_non_alerted_accts) == 19 * len(dev_alerted_accts)
-    print("Train non-alerted accounts:", len(sampled_train_non_alerted_accts))
-    print("Dev non-alerted accounts:", len(sampled_dev_non_alerted_accts))
+    # split_idx = int(0.8 * len(non_alerted_accts))
+    # non_alerted_accts_list = list(non_alerted_accts)
+    # rng.shuffle(non_alerted_accts_list)
+    # train_non_alerted_accts = non_alerted_accts_list[:split_idx]
+    # sampled_train_non_alerted_accts = rng.choice(
+    #     train_non_alerted_accts, size=19 * len(train_alerted_accts), replace=False
+    # )
+    # dev_non_alerted_accts = non_alerted_accts_list[split_idx:]
+    # sampled_dev_non_alerted_accts = rng.choice(
+    #     dev_non_alerted_accts, size=19 * len(dev_alerted_accts), replace=False
+    # )
+    # assert (
+    #     set(sampled_train_non_alerted_accts) & set(sampled_dev_non_alerted_accts) == set()
+    # )
+    # assert len(sampled_train_non_alerted_accts) == 19 * len(train_alerted_accts)
+    # assert len(sampled_dev_non_alerted_accts) == 19 * len(dev_alerted_accts)
+    # print("Train non-alerted accounts:", len(sampled_train_non_alerted_accts))
+    # print("Dev non-alerted accounts:", len(sampled_dev_non_alerted_accts))
 
-    assert len(train_alerted_accts & dev_alerted_accts) == 0
-    assert len(dev_alerted_accts & set(dev_non_alerted_accts)) == 0
-    assert len(test_account & train_alerted_accts) == 0
-    assert len(test_account & dev_alerted_accts) == 0
-    assert len(test_account & set(dev_non_alerted_accts)) == 0
-    assert len(test_account & set(train_non_alerted_accts)) == 0
+    # assert len(train_alerted_accts & dev_alerted_accts) == 0
+    # assert len(dev_alerted_accts & set(dev_non_alerted_accts)) == 0
+    # assert len(test_account & train_alerted_accts) == 0
+    # assert len(test_account & dev_alerted_accts) == 0
+    # assert len(test_account & set(dev_non_alerted_accts)) == 0
+    # assert len(test_account & set(train_non_alerted_accts)) == 0
 
 
     # 3. Process training data
     # Alerted accounts for training
-    train_data.extend(
-        [
-            {
-                "acct": acct,
-                "transactions": aggregated_data[acct]["transactions"],
-                "label": 1,
-            }
-            for acct in tqdm(
-                train_alerted_accts, desc="Processing alerted accounts for training"
-            )
-        ]
-    )
+    # train_data.extend(
+    #     [
+    #         {
+    #             "acct": acct,
+    #             "transactions": aggregated_data[acct]["transactions"],
+    #             "label": 1,
+    #         }
+    #         for acct in tqdm(
+    #             train_alerted_accts, desc="Processing alerted accounts for training"
+    #         )
+    #     ]
+    # )
 
     # Non-alerted accounts for training (transactions before or on cutoff_date)
-    train_data.extend(
-        [
-            {
-                "acct": acct,
-                "transactions": aggregated_data[acct]["transactions"],
-                "label": 0,
-            }
-            for acct in tqdm(
-                sampled_train_non_alerted_accts,
-                desc="Processing non-alerted accounts for training",
-            )
-        ]
-    )
+    # train_data.extend(
+    #     [
+    #         {
+    #             "acct": acct,
+    #             "transactions": aggregated_data[acct]["transactions"],
+    #             "label": 0,
+    #         }
+    #         for acct in tqdm(
+    #             sampled_train_non_alerted_accts,
+    #             desc="Processing non-alerted accounts for training",
+    #         )
+    #     ]
+    # )
 
     # 4. Process dev data
     # Alerted accounts for developing
-    dev_data.extend(
-        [
-            {
-                "acct": acct,
-                "transactions": aggregated_data[acct]["transactions"],
-                "label": 1,
-            }
-            for acct in tqdm(
-                dev_alerted_accts, desc="Processing alerted accounts for developing"
-            )
-        ]
-    )
+    # dev_data.extend(
+    #     [
+    #         {
+    #             "acct": acct,
+    #             "transactions": aggregated_data[acct]["transactions"],
+    #             "label": 1,
+    #         }
+    #         for acct in tqdm(
+    #             dev_alerted_accts, desc="Processing alerted accounts for developing"
+    #         )
+    #     ]
+    # )
 
     # Non-alerted accounts for developing
-    dev_data.extend(
-        [
-            {
-                "acct": acct,
-                "transactions": aggregated_data[acct]["transactions"],
-                "label": 0,
-            }
-            for acct in tqdm(
-                sampled_dev_non_alerted_accts,
-                desc="Processing non-alerted accounts for developing",
-            )
-        ]
-    )
+    # dev_data.extend(
+    #     [
+    #         {
+    #             "acct": acct,
+    #             "transactions": aggregated_data[acct]["transactions"],
+    #             "label": 0,
+    #         }
+    #         for acct in tqdm(
+    #             sampled_dev_non_alerted_accts,
+    #             desc="Processing non-alerted accounts for developing",
+    #         )
+    #     ]
+    # )
 
     # # 5. Upload the resulting train/dev splits onto Hugging Face datasets
     # print("Uploading to Hugging Face datasets...")
-    train_dataset = Dataset.from_list(train_data)
-    dev_dataset = Dataset.from_list(dev_data)
+    # train_dataset = Dataset.from_list(train_data)
+    # dev_dataset = Dataset.from_list(dev_data)
     test_dataset = Dataset.from_list(test_data)
 
     dataset_dict = DatasetDict(
         {
-            "train": train_dataset,
-            "dev": dev_dataset,
+            # "train": train_dataset,
+            # "dev": dev_dataset,
             "test": test_dataset,
         }
     )
 
     # Save to local folder
-    dataset_dict.save_to_disk("acct-fraud-agg-v2")
+    dataset_dict.save_to_disk("acct-fraud-agg-v2_register")
 
 
 if __name__ == "__main__":
