@@ -26,7 +26,6 @@ from tqdm import tqdm, trange
 from Model.gnn import DirectedGINeWithAttention, DualChannelDirectedGIN
 
 
-
 class GPUMonitor:
     """Helper to track and log GPU memory usage throughout the pipeline."""
 
@@ -61,7 +60,7 @@ EDGE_MAX_NUM = 500
 WINDOW = 30  # days
 NEIGHBOR_SAMPLE_SIZES = [100, 10, 5, 5]
 NON_ALERT_FILTER_RATIO = 0.0
-FOLD = 6
+FOLD = 3
 EPOCH = 2000
 PREDICT_STRATEGY = "5%"
 
@@ -71,34 +70,35 @@ print(f"Time window (days): {WINDOW}")
 print(f"Neighbor sample sizes: {NEIGHBOR_SAMPLE_SIZES}")
 
 
-# def set_seed(seed=42):
-#     random.seed(seed)
-#     np.random.seed(seed)
-#     torch.manual_seed(seed)
-#     torch.cuda.manual_seed(seed)
-#     torch.cuda.manual_seed_all(seed)
-#     torch.backends.cudnn.deterministic = True
-#     torch.backends.cudnn.benchmark = False
-
-print("determine seed")
-
-
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
-
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-
-    os.environ["PYTHONHASHSEED"] = str(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    torch.use_deterministic_algorithms(True)
+
+# print("determine seed")
+
+
+# os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
+
+# def set_seed(seed=42):
+#     random.seed(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
+
+#     os.environ["PYTHONHASHSEED"] = str(seed)
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
+
+#     torch.use_deterministic_algorithms(True)
 
 
 def convert_timestamp_to_cyclical(txn_time: str):
@@ -121,11 +121,18 @@ def get_node_and_edge_features(df, register_df, account_mapping):
         columns={"to_acct": "acct", "to_acct_type": "acct_type"}
     )
 
-    register_from_accts = register_df[["from_acct", "from_acct_type"]].rename(columns={"from_acct": "acct", "from_acct_type": "acct_type"})
-    register_to_accts = register_df[["to_acct", "to_acct_type"]].rename(columns={"to_acct": "acct", "to_acct_type": "acct_type"})
+    register_from_accts = register_df[["from_acct", "from_acct_type"]].rename(
+        columns={"from_acct": "acct", "from_acct_type": "acct_type"}
+    )
+    register_to_accts = register_df[["to_acct", "to_acct_type"]].rename(
+        columns={"to_acct": "acct", "to_acct_type": "acct_type"}
+    )
 
     node_df = (
-        pd.concat([from_nodes, to_nodes, register_from_accts, register_to_accts], ignore_index=True)
+        pd.concat(
+            [from_nodes, to_nodes, register_from_accts, register_to_accts],
+            ignore_index=True,
+        )
         .drop_duplicates(subset="acct")
         .reset_index(drop=True)
     )
@@ -133,51 +140,61 @@ def get_node_and_edge_features(df, register_df, account_mapping):
 
     # --- 2. [新增] 處理 Register DF 的統計特徵 ---
     # 目標：算出每個帳號在約定轉帳中的行為特徵
-    
+
     reg_df = register_df.copy()
     # 計算約定轉帳的時間跨度
-    reg_df['duration'] = reg_df['end_date'] - reg_df['start_date']
+    reg_df["duration"] = reg_df["end_date"] - reg_df["start_date"]
 
     # 針對 'from_acct' 聚合：作為發起方幾次？總持續時間？
-    from_stats = reg_df.groupby('from_acct').agg(
-        count_from=('to_acct', 'count'),
-        dur_sum_from=('duration', 'sum')
+    from_stats = reg_df.groupby("from_acct").agg(
+        count_from=("to_acct", "count"), dur_sum_from=("duration", "sum")
     )
-    
+
     # 針對 'to_acct' 聚合：作為接收方幾次？總持續時間？
-    to_stats = reg_df.groupby('to_acct').agg(
-        count_to=('from_acct', 'count'),
-        dur_sum_to=('duration', 'sum')
+    to_stats = reg_df.groupby("to_acct").agg(
+        count_to=("from_acct", "count"), dur_sum_to=("duration", "sum")
     )
 
     # 將統計結果合併回 node_df
     # 使用 left join，因為有些帳號可能根本不在 register_df 裡 (補 0)
-    node_df = node_df.merge(from_stats, left_on='acct', right_index=True, how='left')
-    node_df = node_df.merge(to_stats, left_on='acct', right_index=True, how='left')
+    node_df = node_df.merge(from_stats, left_on="acct", right_index=True, how="left")
+    node_df = node_df.merge(to_stats, left_on="acct", right_index=True, how="left")
 
     # 填補缺失值 (沒出現過代表次數為 0)
-    fill_cols = ['count_from', 'dur_sum_from', 'count_to', 'dur_sum_to']
+    fill_cols = ["count_from", "dur_sum_from", "count_to", "dur_sum_to"]
     node_df[fill_cols] = node_df[fill_cols].fillna(0)
 
     # --- 3. [新增] 衍生特徵計算 ---
     # 總約定次數
-    node_df['reg_total_count'] = node_df['count_from'] + node_df['count_to']
-    
+    node_df["reg_total_count"] = node_df["count_from"] + node_df["count_to"]
+
     # 平均約定時間跨度 (避免除以零)
-    total_duration = node_df['dur_sum_from'] + node_df['dur_sum_to']
-    node_df['reg_avg_duration'] = total_duration / node_df['reg_total_count']
-    node_df['reg_avg_duration'] = node_df['reg_avg_duration'].fillna(0) # 處理 0/0 的情況
-    node_df['reg_min_duration'] = node_df[['dur_sum_from', 'dur_sum_to']].min(axis=1).fillna(0)
-    node_df['reg_max_duration'] = node_df[['dur_sum_from', 'dur_sum_to']].max(axis=1).fillna(0)
+    total_duration = node_df["dur_sum_from"] + node_df["dur_sum_to"]
+    node_df["reg_avg_duration"] = total_duration / node_df["reg_total_count"]
+    node_df["reg_avg_duration"] = node_df["reg_avg_duration"].fillna(
+        0
+    )  # 處理 0/0 的情況
+    node_df["reg_min_duration"] = (
+        node_df[["dur_sum_from", "dur_sum_to"]].min(axis=1).fillna(0)
+    )
+    node_df["reg_max_duration"] = (
+        node_df[["dur_sum_from", "dur_sum_to"]].max(axis=1).fillna(0)
+    )
 
     # --- 4. 組合 Node Features ---
     # Part A: 原本的帳戶類型 (One-hot)
     type_dummies = pd.get_dummies(node_df["acct_type"], prefix="acct_type")
-    
+
     # Part B: 新增的數值特徵
     # 選取你要的特徵欄位
-    reg_feature_cols = ['count_from', 'count_to', 'reg_avg_duration', 'reg_min_duration', 'reg_max_duration']
-    
+    reg_feature_cols = [
+        "count_from",
+        "count_to",
+        "reg_avg_duration",
+        "reg_min_duration",
+        "reg_max_duration",
+    ]
+
     # 標準化 (StandardScaler) 讓數值分佈比較好訓練
     scaler = StandardScaler()
     reg_features_scaled = scaler.fit_transform(node_df[reg_feature_cols])
@@ -187,7 +204,7 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     final_node_features_df = pd.concat([type_dummies, reg_features_df], axis=1)
     final_node_features_df = final_node_features_df.astype(float)
     print(final_node_features_df.head())
-    
+
     # 轉為 Tensor
     node_features = torch.tensor(final_node_features_df.values, dtype=torch.float)
     print(f"Node features shape: {node_features.shape}")
@@ -217,7 +234,14 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     # Save original timestamp before scaling for later edge filtering
     edge_df["timestamp_original"] = edge_df["timestamp"]
 
-    num_cols = ["txn_amt_to_twd", "timestamp", "time_delta_from", "time_delta_to", "sin_txn_time", "cos_txn_time"]
+    num_cols = [
+        "txn_amt_to_twd",
+        "timestamp",
+        "time_delta_from",
+        "time_delta_to",
+        "sin_txn_time",
+        "cos_txn_time",
+    ]
     scale_cols = ["txn_amt_to_twd", "timestamp", "time_delta_from", "time_delta_to"]
     edge_df[num_cols] = edge_df[num_cols].fillna(0)
     st_scaler = StandardScaler()
@@ -315,7 +339,6 @@ def get_node_and_edge_features(df, register_df, account_mapping):
     return node_features, edge_index, edge_features, node_labels, train_mask, test_mask
 
 
-
 def train_model_minibatch(model, loader, optimizer, device, class_weight, monitor):
     """
     Perform one epoch of mini-batch training with memory logging.
@@ -349,7 +372,6 @@ def train_model_minibatch(model, loader, optimizer, device, class_weight, monito
         total_loss += loss.item() * batch_size
         total_examples += batch_size
 
-
     return total_loss / total_examples
 
 
@@ -363,7 +385,7 @@ def evaluate_model_minibatch(model, loader, device, monitor):
         for i, batch in enumerate(loader):
             batch = batch.to(device)
             out = model(batch.x, batch.edge_index, batch.edge_attr)
-            
+
             batch_size = batch.batch_size
             prob = torch.sigmoid(out[:batch_size])
 
@@ -401,7 +423,7 @@ def predict_minibatch(models, data, input_mask, device, monitor):
             for batch in loader:
                 batch = batch.to(device)
                 out = model(batch.x, batch.edge_index, batch.edge_attr)
-                prob = torch.sigmoid(out[:batch.batch_size]).squeeze().cpu()
+                prob = torch.sigmoid(out[: batch.batch_size]).squeeze().cpu()
                 model_probs.append(prob)
 
         full_model_probs = torch.cat(model_probs)
@@ -591,7 +613,7 @@ def main():
         torch.save(model.state_dict(), f"gnn_models/{exp_name}_fold_{fold}.pt")
         print(f"fold_{fold} model saved.")
         models.append(model)
-        break
+        # break  # For testing, only do 1 fold
 
     print("\n--- Starting Inference ---")
     test_preds = predict_minibatch(models, data, test_mask, device, monitor)
