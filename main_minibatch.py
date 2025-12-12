@@ -19,11 +19,11 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
-from torch_geometric.data import Data, HeteroData
+from torch_geometric.data import Data
 from torch_geometric.loader import NeighborLoader
 from tqdm import tqdm, trange
 
-from Model.gnn import DirectedGINeWithAttention, DualChannelDirectedGIN
+from Model.gnn import DirectedGINeWithAttention
 
 
 class GPUMonitor:
@@ -444,7 +444,7 @@ def predict_minibatch(models, data, input_mask, device, monitor):
 
 def main():
     set_seed(42)
-    exp_name = f"minibatch_window{WINDOW}_edge{EDGE_MAX_NUM}_1fold_{NEIGHBOR_SAMPLE_SIZES[0]}neighbors"
+    exp_name = f"minibatch_window{WINDOW}_edge{EDGE_MAX_NUM}_3fold_{NEIGHBOR_SAMPLE_SIZES[0]}neighbors"
     os.makedirs("gnn_models", exist_ok=True)
 
     # Initialize GPU Monitor
@@ -627,7 +627,7 @@ def main():
     print(f"Pred Sum: {test_preds.sum()}")
     print(f"Pred Mean: {test_preds.mean()}")
 
-    results_df.to_csv(f"工作坊_result.csv", index=False)
+    results_df.to_csv("工作坊_result.csv", index=False)
 
 
 if __name__ == "__main__":
